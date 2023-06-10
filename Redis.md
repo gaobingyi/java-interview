@@ -1,0 +1,148 @@
+# Redis
+
+### Redis的使用场景
+
+- 缓存
+- 分布式锁
+- 分布式Session
+- 排行榜
+- 限流 TODO
+- 计数器
+- 验证码
+
+### Redis的数据类型
+
+- Strings
+- Lists
+- Sets
+- Hashes
+- Sorted sets
+- Streams
+- Geospatial indexes
+- Bitmaps
+- Bitfields 位域
+- HyperLogLog
+
+> https://redis.io/docs/data-types/
+
+### Redis的过期键删除策略
+
+- 惰性删除
+- 定期删除
+
+### Redis的内存淘汰策略
+
+- allkeys/volatile-lru：最久没有使用
+- allkeys/volatile-lfu：最不经常使用
+- allkeys/volatile-random
+- volatile-ttl：快要过期
+- no-eviction
+
+### Redis的持久化
+
+- RDB：文件小、恢复快、可靠性低（数据丢失）
+- AOF：文件大、恢复慢、可靠性高
+
+TODO：Redis 4.0混合持久化
+
+### 主从复制
+
+TODO
+
+### 哨兵
+
+TODO
+
+### 集群
+
+TODO
+
+### Redis为什么快
+
+- 内存存储，数据读写快
+- 基于IO多路复用技术实现的文件事件处理器，使用单个线程也能高效地处理客户端请求
+- 设计优秀，如：为每种数据类型提供不同的数据结构、哈希表的渐进式rehash等
+
+#### Redis为什么使用单线程模型
+
+- 系统瓶颈通常来源于内存和网络带宽，不在于CPU
+- 单线程模型的优势：功能实现简单、没有线程切换开销、没有锁竞争
+- 可以通过多实例充分利用多核CPU
+
+> https://redis.io/docs/getting-started/faq/
+
+#### Redis的多线程演进
+
+- Redis 4.0：LAZY FREEING，使用BIO thread异步处理耗时的删除操作，如：UNLINK、FLUSHDB ASYNC
+- Redis 6.0：THREADED I/O，使用I/O threads并发读写Socket和协议解析
+
+- --
+
+### 缓存一致性问题
+
+相对更优的更新策略：先更新数据库，再删除缓存
+
+缓存不一致的情况：
+- Case1：并发读写时，缓存失效且读请求被写请求打断，导致读请求向缓存中写入了过期数据
+- Case2：删除缓存失败，导致缓存中保留了过期数据
+- Case3：数据库主从同步延时，数据被更新后还未同步到从库，读请求读从库读到了过期数据，并写入缓存中
+
+解决方案：
+- Case1：延时双删，第一次删除避免写请求过程中出现不一致，第二次删除避免写请求完成后出现不一致
+- Case2：删除失败重试，通常引入MQ异步重试，保证最终删除成功
+- Case3：通过监听从库的binlog，执行删除操作
+
+> 终极解决方案：
+> - 可以接受短暂不一致：设置合理的过期时间
+> - 必须强一致：不使用缓存
+
+#### 两级缓存一致性问题
+
+- 数据读取流程：本地缓存 -> 远程缓存 -> 数据库
+- 数据更新流程：更新数据库 -> 删除远程缓存 -> 依赖MQ发布删除消息到每一个服务实例 -> 删除本地缓存
+
+### 缓存穿透、缓存雪崩、缓存击穿
+
+- 缓存穿透：大量请求系统不存在的数据，解决方案：
+  - 缓存null值
+  - 使用布隆过滤器
+- 缓存雪崩：大量缓存同时过期，解决方案：
+  - 离散化缓存过期时间
+- 缓存击穿：热点缓存的失效，解决方案：
+  - 读数据库和加载缓存时加分布式锁，其它线程等待
+  - 永不过期，缓存一致性通过其它方式保证，如定期更新、监听binlog
+    
+### 热键问题
+
+- 主从结构：增加从实例，分摊读请求
+- 集群：增加key（key-1/key-2/...），将数据保存到多台分片实例上，分摊读请求
+- 增加本地缓存，拦截读请求
+
+- --
+
+### 分布式锁
+
+通常解决两类问题：
+- 保证请求串行执行，每个请求都要执行或超时处理
+- 保证只有一个请求可以执行，比如分布式定时任务
+
+Redis实现：
+```shell
+# acquire lock
+SET resource_name my_random_value NX PX 30000
+# release lock
+if redis.call("get",KEYS[1]) == ARGV[1] then
+    return redis.call("del",KEYS[1])
+else
+    return 0
+end
+```
+
+RedLock算法：
+- 获取当前时间戳
+- 依次向每个Redis实例申请锁，如果超时（远远小于锁自动释放时间），则下一个
+- 如果向超过一半的Redis实例申请锁成功，且耗时小于锁自动释放时间，则视为加锁成功
+- 否则视为加锁失败，依次向每个Redis实例释放锁
+
+> https://redis.io/docs/manual/patterns/distributed-locks  
+> https://github.com/redisson/redisson
