@@ -122,27 +122,4 @@ TODO
 
 ### 分布式锁
 
-通常解决两类问题：
-- 保证请求串行执行，每个请求都要执行或超时处理
-- 保证只有一个请求可以执行，比如分布式定时任务
-
-Redis实现：
-```shell
-# acquire lock
-SET resource_name my_random_value NX PX 30000
-# release lock
-if redis.call("get",KEYS[1]) == ARGV[1] then
-    return redis.call("del",KEYS[1])
-else
-    return 0
-end
-```
-
-RedLock算法：
-- 获取当前时间戳
-- 依次向每个Redis实例申请锁，如果超时（远远小于锁自动释放时间），则下一个
-- 如果向超过一半的Redis实例申请锁成功，且耗时小于锁自动释放时间，则视为加锁成功
-- 否则视为加锁失败，依次向每个Redis实例释放锁
-
-> https://redis.io/docs/manual/patterns/distributed-locks  
-> https://github.com/redisson/redisson
+[分布式锁](分布式与微服务.md)
